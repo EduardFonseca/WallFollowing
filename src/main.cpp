@@ -14,7 +14,10 @@ int left_hand_rule = 0;
 int flag_movement = 0;
 
 int wheel_radius = 35; // milimiters
+float wheel_base = 120;
+float theta = 0.0;
 
+float aux = 0;
 //function global var
 // int battery_mV;
 // int on_button_state;
@@ -29,13 +32,13 @@ const byte encoderRpinB = 3;//B pin -> the digital pin 3
 // ultrasonic pins
 const int trigPinL = 8;
 const int echoPinL = 9;
-float durationUltraL, distanceL;
+float durationUltraL, distanceWallL;
 unsigned long tesL = 0;
 int flagPulseL = 0;
 
 const int trigPinR = 27;
 const int echoPinR = 26;
-float durationUltraR, distanceR;
+float durationUltraR, distanceWallR;
 unsigned long tesR = 0;
 int flagPulseR = 0;
 
@@ -63,7 +66,7 @@ float max_lin_vel_R = 100; //TODO: VERIFICAR QUAL E A VELOCIDADE PAR O PWM 1 par
 
 // Funtions declaration
 void set_state(fsm_t& fsm, int new_state);
-void wall_following_sm(fsm_t& fsm, int mode);
+void wall_following_sm(fsm_t& fsm, float speed);
 
 void EncoderInit();
 void wheelSpeedLeft();
@@ -76,6 +79,9 @@ void UltraDistR();
 
 void moveForward(float pwm, float PID_L, float PID_R);
 void moveBackward(float pwm);
+void turnLeft(float pwm);
+void turnRight(float pwm);
+void stop();
 
 float PIDControl_L(float pulse, float setpoint, float dt);
 float PIDControl_R(float pulse, float setpoint, float dt);
@@ -118,28 +124,36 @@ void loop() {
       last_cycle = now;
 
       // dt =  dt/1000000;
-      // moveForward(0.3, PID_L, 0);
+      // moveForward(0.3, 0, 0);
       float omega_L = (3.14/180.0) * ((durationL * 9)/24)/(dt/1000);
       float omega_R = (3.14/180.0) * ((durationR * 9)/24)/(dt/1000);
       // float omega_R = durationR * 1000000 / dif;
 
       float lin_vel_L = wheel_radius * omega_L / 1000;
       float lin_vel_R = wheel_radius * omega_R / 1000;
+      
 
+      if (Serial.available()) {  // Only do this if there is serial data to be read
+        uint8_t b = Serial.read();       
+        if (b == '-') aux += 0.1;  // Press '-' to decrease the frequency
+        if (b == '+') aux -= 0.1; // Press '+' to increase the frequency
+      }  
+
+      // float dtheta = (omega_R - omega_L)*wheel_radius / wheel_base;
+
+      // theta += dtheta;
       // PID_L = PIDControl_L(lin_vel_L, 0.22, dt); // TODO: ENTENDER COMO TUNAR O PID E COMO FAZER ELE ATUAR NO PWM 
-
-      // if (Serial.available()) {  // Only do this if there is serial data to be read
-      //   uint8_t b = Serial.read();       
-      //   if (b == '-') Kp_L = Kp_L - 0.1;  // Press '-' to decrease the frequency
-      //   if (b == '+') Kp_L = Kp_L + 0.1; // Press '+' to increase the frequency
-      // }  
-
+      // if(theta > 3.1415/2 || theta < -3.1415/2){
+      //   aux = 0;
+      //   theta = 0;
+      // }
+      
       UltraSonicPulse();
-  
+      wall_following_sm(fsm_wall, aux);
 
       pico4drive_update();
-      Serial.print("Bat_V: ");
-      Serial.print(battery_mV);
+      Serial.print("state: ");
+      Serial.print(fsm_wall.state);
 
       Serial.print(" PulseL:");
       Serial.print(durationL);
@@ -149,15 +163,12 @@ void loop() {
       Serial.print(lin_vel_L);
       Serial.print(" Lin_vel_R:");
       Serial.print(lin_vel_R);
-      Serial.print(" dt: ");
+      Serial.print(" dtheta: ");
       Serial.print(dt);
-      Serial.print(" distanceR: ");
-      Serial.print(distanceR);
-      Serial.print(" distanceL:");
-      Serial.println(distanceL);
-
-
-
+      Serial.print(" distanceWallR: ");
+      Serial.print(distanceWallR);
+      Serial.print(" distanceWallL:");
+      Serial.println(distanceWallL);
       
       durationL = 0;
       durationR = 0;
@@ -175,7 +186,7 @@ void set_state(fsm_t& fsm, int new_state)
   }
 }
 
-void wall_following_sm(fsm_t& fsm,  int mode){
+void wall_following_sm(fsm_t& fsm, float speed){
   /*
   Wall following state machine
   args:
@@ -189,44 +200,38 @@ void wall_following_sm(fsm_t& fsm,  int mode){
     4 - turn around
     5 - stop
   */
-  if(mode == 0){
-    if(fsm.state == 0 /* && flag_movement == 1*/){
-      // TODO: IMPLEMENTAR O QUE INICIA A MAQUINA DE ESTADOS
-      fsm.new_state = 1;
-    }else if(fsm.state == 1){
-      // TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 2 SE HOUVER ABERTURA NA ESQUERDA
-      fsm.new_state = 2;
-    }else if(fsm.state == 1){
-      // TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 3 SE HOUVER PAREDE NA FRENTE E ABERTURA NA DIREITA
-      fsm.new_state = 3;
-    }else if(fsm.state == 1){
-      // TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 4 SE HOUVER NAO HOUVER ABERTURA E NAO FOR O ENDPOINT
-      fsm.new_state = 4;
-    }else if((fsm.state == 2 || fsm.state == 3 || fsm.state == 4) && flag_movement == 1){
-      // TODO: Implementar a mudanca de estado para 1
-      fsm.new_state = 1;
-    }
-    //else if(endpoind == 1){
-    //  TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 5
-    //  fsm.new_state = 5;
-    //}
 
-    // set new state
-    set_state(fsm, fsm.new_state);
+  int wall_tresh = 10;
+  if(fsm.state == 0 && on_button_state == 1){
+    // TODO: IMPLEMENTAR O QUE INICIA A MAQUINA DE ESTADOS
+    fsm.new_state = 1;
+  }else if(fsm.state == 1 && distanceWallL > wall_tresh){
+    // TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 2 SE HOUVER ABERTURA NA ESQUERDA
+    // virar 90 graus para a esquerda e voltar para o estado 1
+    fsm.new_state = 2;
+  }else if(fsm.state == 1 && distanceWallL < wall_tresh && distanceWallR < wall_tresh){
+    // TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 3 SE HOUVER PAREDE NA FRENTE E ABERTURA NA DIREITA
+    // virar para a direita ate que a frente do robo esteja livre e assim volte para o estado 1
+    fsm.new_state = 3;
+  }else if((fsm.state == 2 || fsm.state == 3 || fsm.state == 4) && on_button_state == 1 /*apos se rotacionar 90 graus atualizar flag quevolta ao estado 1*/){
+    // retorno para o estado 1
+    fsm.new_state = 1;
+  }
+  // set new state
+  set_state(fsm, fsm.new_state);
 
-    if(fsm.state == 0){
-      // STANDBY
-    }else if(fsm.state == 1){
-      // GO FORWARD
-    }else if(fsm.state == 2){
-      // TURN LEFT
-    }else if(fsm.state == 3){
-      // TURN RIGHT
-    }else if(fsm.state == 4){
-      // TURN AROUND
-    }else if(fsm.state == 5){
-      // STOP
-    }
+  if(fsm.state == 0){
+    // STANDBY
+    stop();
+  }else if(fsm.state == 1){
+    // GO FORWARD
+    moveForward(speed,0,0);
+  }else if(fsm.state == 2){
+    // TURN LEFT
+    turnLeft(speed);
+  }else if(fsm.state == 3){
+    // TURN RIGHT
+    turnRight(speed);
   }
 }
 
@@ -300,7 +305,7 @@ void UltraDistL (){
     tesL = micros();
   }else{
     durationUltraL = micros() - tesL;
-    distanceL = 0.5*(344*durationUltraL)/10000.0; // return in CM
+    distanceWallL = 0.5*(344*durationUltraL)/10000.0; // return in CM
     flagPulseL = 0;
     tesL = 0;
   }
@@ -311,7 +316,7 @@ void UltraDistR (){
     tesR = micros();
   }else{
     durationUltraR = micros() - tesR;
-    distanceR = 0.5*(344*durationUltraR)/10000.0; // return in CM
+    distanceWallR = 0.5*(344*durationUltraR)/10000.0; // return in CM
     flagPulseR = 0;
     tesR = 0;
   }
@@ -336,15 +341,8 @@ void UltraSonicPulse(){
     flagPulseR = 1;
   }
 
-
-  // durationUltraL = pulseIn(echoPinL,HIGH,50000);
-  // durationUltraR = pulseIn(echoPinR,HIGH,50000);
-
-  // distanceL = 0.5*(344*durationUltraL)/10000.0; // return in CM
-  // distanceR = 0.5*(344*durationUltraR)/10000.0;
   // durationUltraL = pulseIn(echoPinL, HIGH);
 }
-
 
 
 float PIDControl_L(float lin_vel, float setpoint, float dt){
@@ -383,20 +381,20 @@ void moveBackward(float pwm){
   pico4drive_set_motor_pwm(DRV_4, pwm); 
 }
 
-// void turnLeft(){
-//   // Implementar o controle
-//   pico4drive_set_motor_pwm(DRV_1, 0);
-//   pico4drive_set_motor_pwm(DRV_4, 0); 
-// }
+void turnLeft(float pwm){
+  // Implementar o controle
+  pico4drive_set_motor_pwm(DRV_1, pwm);
+  pico4drive_set_motor_pwm(DRV_4, pwm); 
+}
 
-// void turnRight(){
-//   // Implementar o controle
-//   pico4drive_set_motor_pwm(DRV_1, 0);
-//   pico4drive_set_motor_pwm(DRV_4, 0); 
-// }
+void turnRight(float pwm){
+  // Implementar o controle
+  pico4drive_set_motor_pwm(DRV_1, -pwm);
+  pico4drive_set_motor_pwm(DRV_4, -pwm); 
+}
 
-// void stop(){
-//   // Implementar o controle
-//   pico4drive_set_motor_pwm(DRV_1, 0);
-//   pico4drive_set_motor_pwm(DRV_4, 0);
-// }
+void stop(){
+  // Implementar o controle
+  pico4drive_set_motor_pwm(DRV_1, 0);
+  pico4drive_set_motor_pwm(DRV_4, 0);
+}
