@@ -3,6 +3,8 @@
 
 // global variables
 // uint8_t b;
+
+#define pi 3.1415926535897932384626433832795
 unsigned long interval, last_cycle;
 unsigned long loop_micros;
 byte encoderLpinALast, encoderRpinALast;
@@ -14,10 +16,15 @@ int left_hand_rule = 0;
 int flag_movement = 0;
 
 int wheel_radius = 35; // milimiters
-float wheel_base = 120;
+float wheel_base = 137.5;
 float theta = 0.0;
 
 float aux = 0;
+float v, w;
+
+// Posição inicial (x, y, theta):
+double P0[3] = {0, 0, 0};
+double dPdt[3] = {0,0,0};
 //function global var
 // int battery_mV;
 // int on_button_state;
@@ -123,11 +130,12 @@ void loop() {
       loop_micros = micros();
       last_cycle = now;
 
-      // dt =  dt/1000000;
-      // moveForward(0.3, 0, 0);
-      float omega_L = (3.14/180.0) * ((durationL * 9)/24)/(dt/1000);
-      float omega_R = (3.14/180.0) * ((durationR * 9)/24)/(dt/1000);
-      // float omega_R = durationR * 1000000 / dif;
+
+      // TODO: com o encoder de cada roda e possivel saber a distancia que cada uma andou e assim ver angulo e posicao do robo
+      // calcular a distancia andada em linha reta antes de virar e dps de virar 
+
+      float omega_L = (pi/180.0) * ((durationL * 9)/24)/(dt/1000);
+      float omega_R = (pi/180.0) * (-1)*((durationR * 9)/24)/(dt/1000);
 
       float lin_vel_L = wheel_radius * omega_L / 1000;
       float lin_vel_R = wheel_radius * omega_R / 1000;
@@ -135,8 +143,9 @@ void loop() {
 
       if (Serial.available()) {  // Only do this if there is serial data to be read
         uint8_t b = Serial.read();       
-        if (b == '-') aux += 0.1;  // Press '-' to decrease the frequency
-        if (b == '+') aux -= 0.1; // Press '+' to increase the frequency
+        Serial.println(b);
+        if (b == '-') aux -= 0.2;  // Press '-' to decrease the frequency
+        if (b == '+') aux += 0.2; // Press '+' to increase the frequency
       }  
 
       // float dtheta = (omega_R - omega_L)*wheel_radius / wheel_base;
@@ -147,28 +156,65 @@ void loop() {
       //   aux = 0;
       //   theta = 0;
       // }
+
+      v = (lin_vel_L+lin_vel_R)/2;
+      w = (lin_vel_R-lin_vel_L)/(wheel_base/1000);
+
+            // Modelo diferencial do robô
+      dPdt[0] = v * cos(P0[2]);    
+      dPdt[1] = v * sin(P0[2]);
+      dPdt[2] = w;
       
+      P0[0] = P0[0] + dPdt[0] * dt/1000;
+      P0[1] = P0[1] + dPdt[1] * dt/1000;
+      P0[2] = P0[2] + dPdt[2] * dt/1000;
+
+      if(P0[2]>= pi/2 || P0[2] <= -pi/2 || P0[0]<-0.30){
+        aux = 0;
+        P0[2] = 0;
+      }
+
+      while(P0[2] > 2*pi){
+        P0[2] = P0[2] - 2*pi;
+      }
+
       UltraSonicPulse();
-      wall_following_sm(fsm_wall, aux);
+      // wall_following_sm(fsm_wall, aux);
+      // moveForward(aux, PID_L, 0.0);
+      turnRight(aux);
 
       pico4drive_update();
       Serial.print("state: ");
       Serial.print(fsm_wall.state);
 
-      Serial.print(" PulseL:");
-      Serial.print(durationL);
-      Serial.print(" PulseR:");
-      Serial.print(durationR);
-      Serial.print(" lin_vel_L:");
-      Serial.print(lin_vel_L);
-      Serial.print(" Lin_vel_R:");
-      Serial.print(lin_vel_R);
-      Serial.print(" dtheta: ");
+      // Serial.print(" PulseL:");
+      // Serial.print(durationL);
+      // Serial.print(" PulseR:");
+      // Serial.print(durationR);
+      // Serial.print(" lin_vel_L:");
+      // Serial.print(lin_vel_L);
+      // Serial.print(" Lin_vel_R:");
+      // Serial.print(lin_vel_R);
+      Serial.print(" dt: ");
       Serial.print(dt);
-      Serial.print(" distanceWallR: ");
-      Serial.print(distanceWallR);
-      Serial.print(" distanceWallL:");
-      Serial.println(distanceWallL);
+      // Serial.print(" distanceWallR: ");
+      // Serial.print(distanceWallR);
+      // Serial.print(" distanceWallL:");
+      // Serial.print(distanceWallL);
+      // Serial.print(" aux:");
+      // Serial.print(aux);
+      Serial.print(" v:");
+      Serial.print(v);
+      Serial.print(" w:");
+      Serial.print(w);
+      Serial.print(" x:");
+      Serial.print(P0[0]);
+      Serial.print(" y:");
+      Serial.print(P0[1]);
+      Serial.print(" theta:");
+      Serial.print(P0[2]);
+      Serial.println("");
+
       
       durationL = 0;
       durationR = 0;
