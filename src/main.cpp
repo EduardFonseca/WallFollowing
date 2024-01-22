@@ -19,12 +19,15 @@ int wheel_radius = 35; // milimiters
 float wheel_base = 137.5;
 float theta = 0.0;
 
-float aux = 0;
+float aux = 0.3;
 float v, w;
 
 // Posição inicial (x, y, theta):
 double P0[3] = {0, 0, 0};
+// diferencial de posição
 double dPdt[3] = {0,0,0};
+
+//posicao auxiliar
 double P[3] = {0, 0, 0};
 //function global var
 // int battery_mV;
@@ -118,10 +121,6 @@ void setup() {
 }
 
 void loop() {
-  // modify variable value through serial port
-  // if (Serial.available()) {  // Only do this if there is serial data to be read
-  //     b = Serial.read();       
-  // }
 
   // Do this only every "interval" miliseconds 
 
@@ -131,11 +130,7 @@ void loop() {
       loop_micros = micros();
       last_cycle = now;
 
-
-      // TODO: com o encoder de cada roda e possivel saber a distancia que cada uma andou e assim ver angulo e posicao do robo
-      // calcular a distancia andada em linha reta antes de virar e dps de virar 
-
-      float omega_L = (pi/180.0) * ((durationL * 9)/24)/(dt/1000);
+      float omega_L = (pi/180.0) * (-1)*((durationL * 9)/24)/(dt/1000);
       float omega_R = (pi/180.0) * (-1)*((durationR * 9)/24)/(dt/1000);
 
       float lin_vel_L = wheel_radius * omega_L / 1000;
@@ -148,20 +143,12 @@ void loop() {
         if (b == '-') aux -= 0.2;  // Press '-' to decrease the frequency
         if (b == '+') aux += 0.2; // Press '+' to increase the frequency
       }  
-
-      // float dtheta = (omega_R - omega_L)*wheel_radius / wheel_base;
-
-      // theta += dtheta;
       // PID_L = PIDControl_L(lin_vel_L, 0.22, dt); // TODO: ENTENDER COMO TUNAR O PID E COMO FAZER ELE ATUAR NO PWM 
-      // if(theta > 3.1415/2 || theta < -3.1415/2){
-      //   aux = 0;
-      //   theta = 0;
-      // }
 
       v = (lin_vel_L+lin_vel_R)/2;
       w = (lin_vel_R-lin_vel_L)/(wheel_base/1000);
 
-            // Modelo diferencial do robô
+      // Modelo diferencial do robô
       dPdt[0] = v * cos(P0[2]);    
       dPdt[1] = v * sin(P0[2]);
       dPdt[2] = w;
@@ -170,19 +157,17 @@ void loop() {
       P0[1] = P0[1] + dPdt[1] * dt/1000;
       P0[2] = P0[2] + dPdt[2] * dt/1000;
 
-      if(P0[2]>= pi/2 || P0[2] <= -pi/2 || P0[0]<-0.30){
-        aux = 0;
-        P0[2] = 0;
-      }
-
-      while(P0[2] > 2*pi){
-        P0[2] = P0[2] - 2*pi;
-      }
+      // while(P0[2] > 2*pi){
+      //   P0[2] = P0[2] - 2*pi;
+      // }
+      // while(P0[2] < -2*pi){
+      //   P0[2] = P0[2] + 2*pi;
+      // }
 
       UltraSonicPulse();
       wall_following_sm(fsm_wall, aux);
-      // moveForward(aux, PID_L, 0.0);
-      // turnRight(aux);
+      // moveForward(aux, PID_L, 0);
+      //turnLeft(aux);
 
       pico4drive_update();
 
@@ -190,16 +175,16 @@ void loop() {
       // Serial.print(durationL);
       // Serial.print(" PulseR:");
       // Serial.print(durationR);
-      // Serial.print(" lin_vel_L:");
-      // Serial.print(lin_vel_L);
-      // Serial.print(" Lin_vel_R:");
-      // Serial.print(lin_vel_R);
+      Serial.print(" lin_vel_L:");
+      Serial.print(lin_vel_L);
+      Serial.print(" Lin_vel_R:");
+      Serial.print(lin_vel_R);
       Serial.print("dt:");
       Serial.print(dt);
       // Serial.print(" distanceWallR: ");
       // Serial.print(distanceWallR);
-      // Serial.print(" distanceWallL:");
-      // Serial.print(distanceWallL);
+      Serial.print(" distanceWallL:");
+      Serial.print(distanceWallL);
       // Serial.print(" aux:");
       // Serial.print(aux);      
       Serial.print(" state:");
@@ -215,6 +200,7 @@ void loop() {
       Serial.print(" theta:");
       Serial.print(P0[2]);
       Serial.print(" teste:");
+      Serial.print(abs(P[2]-P0[2]));
       Serial.println("");
 
       
@@ -260,9 +246,12 @@ void wall_following_sm(fsm_t& fsm, float speed){
     P[1]=P0[1];
     P[2]=P0[2];
     fsm.new_state = 2;
-  }else if(fsm.state == 1 && distanceWallL < wall_tresh && distanceWallR < wall_tresh){
+  }else if(fsm.state == 1 && distanceWallL < wall_tresh && distanceWallR < wall_tresh-3){
     // TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 3 SE HOUVER PAREDE NA FRENTE E ABERTURA NA DIREITA
     // virar para a direita ate que a frente do robo esteja livre e assim volte para o estado 1
+    P[0]=P0[0];
+    P[1]=P0[1];
+    P[2]=P0[2];
     fsm.new_state = 3;
   }else if(flag_movement == 1){
     // retorno para o estado 1
@@ -281,18 +270,27 @@ void wall_following_sm(fsm_t& fsm, float speed){
     flag_movement = 0;
   }else if(fsm.state == 2){
     // TURN LEFT
-    if((abs(P[0]-P0[0]) < 0.1) && (abs(P[1]-P0[1]) < 0.1)){
+    if((abs(P[0]-P0[0]) < 0.12) && (abs(P[1]-P0[1]) < 0.12)){
       moveForward(speed,0,0);
     }else{
-      if(abs(P[2]-P0[2]) < pi/2){
+      if(abs(P[2]-P0[2]) < (pi/2-0*pi/18)){
         turnLeft(speed);
+      }else if((abs(P[0]-P0[0]) < 0.15) && (abs(P[1]-P0[1]) < 0.15)){
+      moveForward(speed,0,0);
       }else{
-        fsm.new_state = 1;
+        flag_movement = 1;
       }
     }
   }else if(fsm.state == 3){
     // TURN RIGHT
-    turnRight(speed);
+    if(abs(P[2]-P0[2]) < (pi/2-10*pi/180)){
+        turnRight(speed);
+    }else if(distanceWallR > wall_tresh){
+      fsm.new_state = 1;
+    }else{
+      P[2] = P0[2];
+    }
+
   }
 }
 
@@ -433,29 +431,29 @@ float PIDControl_R(float lin_vel, float setpoint, float dt){
 
 void moveForward(float pwm, float PID_L, float PID_R){
   // Implementar o controle
-  pico4drive_set_motor_pwm(DRV_1, pwm);
-  pico4drive_set_motor_pwm(DRV_4, -pwm); 
+  pico4drive_set_motor_pwm(DRV_4, pwm);
+  pico4drive_set_motor_pwm(DRV_3, pwm); 
 }
 void moveBackward(float pwm){
   // Implementar o controle
-  pico4drive_set_motor_pwm(DRV_1, -pwm);
-  pico4drive_set_motor_pwm(DRV_4, pwm); 
+  pico4drive_set_motor_pwm(DRV_4, -pwm);
+  pico4drive_set_motor_pwm(DRV_3, -pwm); 
 }
 
 void turnLeft(float pwm){
   // Implementar o controle
-  pico4drive_set_motor_pwm(DRV_1, pwm);
-  pico4drive_set_motor_pwm(DRV_4, pwm); 
+  pico4drive_set_motor_pwm(DRV_4, pwm);
+  pico4drive_set_motor_pwm(DRV_3, -pwm); 
 }
 
 void turnRight(float pwm){
   // Implementar o controle
-  pico4drive_set_motor_pwm(DRV_1, -pwm);
-  pico4drive_set_motor_pwm(DRV_4, -pwm); 
+  pico4drive_set_motor_pwm(DRV_4, -pwm);
+  pico4drive_set_motor_pwm(DRV_3,  pwm); 
 }
 
 void stop(){
   // Implementar o controle
-  pico4drive_set_motor_pwm(DRV_1, 0);
   pico4drive_set_motor_pwm(DRV_4, 0);
+  pico4drive_set_motor_pwm(DRV_3, 0);
 }
