@@ -25,6 +25,7 @@ float v, w;
 // Posição inicial (x, y, theta):
 double P0[3] = {0, 0, 0};
 double dPdt[3] = {0,0,0};
+double P[3] = {0, 0, 0};
 //function global var
 // int battery_mV;
 // int on_button_state;
@@ -179,13 +180,11 @@ void loop() {
       }
 
       UltraSonicPulse();
-      // wall_following_sm(fsm_wall, aux);
+      wall_following_sm(fsm_wall, aux);
       // moveForward(aux, PID_L, 0.0);
-      turnRight(aux);
+      // turnRight(aux);
 
       pico4drive_update();
-      Serial.print("state: ");
-      Serial.print(fsm_wall.state);
 
       // Serial.print(" PulseL:");
       // Serial.print(durationL);
@@ -195,14 +194,16 @@ void loop() {
       // Serial.print(lin_vel_L);
       // Serial.print(" Lin_vel_R:");
       // Serial.print(lin_vel_R);
-      Serial.print(" dt: ");
+      Serial.print("dt:");
       Serial.print(dt);
       // Serial.print(" distanceWallR: ");
       // Serial.print(distanceWallR);
       // Serial.print(" distanceWallL:");
       // Serial.print(distanceWallL);
       // Serial.print(" aux:");
-      // Serial.print(aux);
+      // Serial.print(aux);      
+      Serial.print(" state:");
+      Serial.print(fsm_wall.state);
       Serial.print(" v:");
       Serial.print(v);
       Serial.print(" w:");
@@ -213,6 +214,7 @@ void loop() {
       Serial.print(P0[1]);
       Serial.print(" theta:");
       Serial.print(P0[2]);
+      Serial.print(" teste:");
       Serial.println("");
 
       
@@ -254,12 +256,15 @@ void wall_following_sm(fsm_t& fsm, float speed){
   }else if(fsm.state == 1 && distanceWallL > wall_tresh){
     // TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 2 SE HOUVER ABERTURA NA ESQUERDA
     // virar 90 graus para a esquerda e voltar para o estado 1
+    P[0]=P0[0];
+    P[1]=P0[1];
+    P[2]=P0[2];
     fsm.new_state = 2;
   }else if(fsm.state == 1 && distanceWallL < wall_tresh && distanceWallR < wall_tresh){
     // TODO: IMPLEMENTAR MUDANCA DE ESTADO PARA O 3 SE HOUVER PAREDE NA FRENTE E ABERTURA NA DIREITA
     // virar para a direita ate que a frente do robo esteja livre e assim volte para o estado 1
     fsm.new_state = 3;
-  }else if((fsm.state == 2 || fsm.state == 3 || fsm.state == 4) && on_button_state == 1 /*apos se rotacionar 90 graus atualizar flag quevolta ao estado 1*/){
+  }else if(flag_movement == 1){
     // retorno para o estado 1
     fsm.new_state = 1;
   }
@@ -269,12 +274,22 @@ void wall_following_sm(fsm_t& fsm, float speed){
   if(fsm.state == 0){
     // STANDBY
     stop();
+    flag_movement = 0;
   }else if(fsm.state == 1){
     // GO FORWARD
-    moveForward(speed,0,0);
+    moveForward(speed,0,0);    
+    flag_movement = 0;
   }else if(fsm.state == 2){
     // TURN LEFT
-    turnLeft(speed);
+    if((abs(P[0]-P0[0]) < 0.1) && (abs(P[1]-P0[1]) < 0.1)){
+      moveForward(speed,0,0);
+    }else{
+      if(abs(P[2]-P0[2]) < pi/2){
+        turnLeft(speed);
+      }else{
+        fsm.new_state = 1;
+      }
+    }
   }else if(fsm.state == 3){
     // TURN RIGHT
     turnRight(speed);
